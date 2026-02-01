@@ -333,3 +333,8 @@ func ParsePostgreSQLConnection(connectionString string) (map[string]string, erro
 func (db *DB) Close() error {
 	return db.DB.Close()
 }
+
+// GetType returns the database type
+func (db *DB) GetType() string {
+	return db.dbType
+}

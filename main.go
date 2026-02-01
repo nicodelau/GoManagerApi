@@ -60,7 +60,7 @@ func main() {
 		GoogleServices: googleServicesHandler,
 		GoogleAds:      googleAdsHandler,
 	}
-	mux := router.Setup(handlers, authSvc)
+	mux := router.SetupWithConfig(handlers, authSvc, cfg)
 
 	// Start server
 	addr := fmt.Sprintf(":%s", cfg.Port)

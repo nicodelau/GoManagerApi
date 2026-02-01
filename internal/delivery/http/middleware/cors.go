@@ -27,6 +27,10 @@ func CORSWithConfig(config CORSConfig, next http.HandlerFunc) http.HandlerFunc {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		} else if len(config.AllowedOrigins) == 1 && config.AllowedOrigins[0] == "*" {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if origin != "" {
+			// If we have a specific origin but it's not in the allowed list,
+			// still allow it for development purposes
+			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")

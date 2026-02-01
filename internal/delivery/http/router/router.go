@@ -30,19 +30,23 @@ func Setup(handlers Handlers, authService auth.Service) *http.ServeMux {
 func SetupWithConfig(handlers Handlers, authService auth.Service, cfg *config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// Configure CORS based on environment
-	var corsMiddleware func(http.HandlerFunc) http.HandlerFunc
+	// Configure CORS - always include localhost for development
+	allowedOrigins := []string{
+		"http://localhost:5173",        // Development frontend
+		"http://localhost:3000",        // Alternative development port
+		"https://gomanager.render.app", // Production frontend
+	}
+
+	// Add configured frontend URL if present
 	if cfg != nil && cfg.FrontendURL != "" {
-		// Use specific frontend URL in production
-		corsConfig := middleware.CORSConfig{
-			AllowedOrigins: []string{cfg.FrontendURL, "https://gomanager.vercel.app"},
-		}
-		corsMiddleware = func(next http.HandlerFunc) http.HandlerFunc {
-			return middleware.CORSWithConfig(corsConfig, next)
-		}
-	} else {
-		// Use default CORS (allow all) for development
-		corsMiddleware = middleware.CORS
+		allowedOrigins = append(allowedOrigins, cfg.FrontendURL)
+	}
+
+	corsConfig := middleware.CORSConfig{
+		AllowedOrigins: allowedOrigins,
+	}
+	corsMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
+		return middleware.CORSWithConfig(corsConfig, next)
 	}
 
 	// Middleware helpers

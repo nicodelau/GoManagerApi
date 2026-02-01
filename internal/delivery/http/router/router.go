@@ -2,6 +2,7 @@ package router
 
 import (
 	"net/http"
+	"time"
 
 	"gomanager/internal/application/auth"
 	"gomanager/internal/delivery/http/handler"
@@ -62,6 +63,20 @@ func SetupWithConfig(handlers Handlers, authService auth.Service, cfg *config.Co
 		}
 		return h
 	}
+
+	// ==================
+	// Health check route (public)
+	// ==================
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok","message":"GoManager API is running"}`))
+	})
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"healthy","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
+	})
 
 	// ==================
 	// Auth routes (public)

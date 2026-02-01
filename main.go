@@ -19,8 +19,8 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
-	// Initialize database
-	db, err := database.New(cfg.DatabasePath)
+	// Initialize database (supports both PostgreSQL and SQLite)
+	db, err := database.NewDatabase(cfg.DatabasePath)
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
@@ -48,6 +48,7 @@ func main() {
 	oauthHandler := handler.NewOAuthHandler(cfg, authSvc, userRepo)
 	userHandler := handler.NewUserHandler(authSvc, userRepo, cfg.StoragePath)
 	googleServicesHandler := handler.NewGoogleServicesHandler(cfg, userRepo)
+	googleAdsHandler := handler.NewGoogleAdsHandler(cfg, userRepo)
 
 	// Setup routes
 	handlers := router.Handlers{
@@ -57,6 +58,7 @@ func main() {
 		OAuth:          oauthHandler,
 		User:           userHandler,
 		GoogleServices: googleServicesHandler,
+		GoogleAds:      googleAdsHandler,
 	}
 	mux := router.Setup(handlers, authSvc)
 
@@ -70,6 +72,12 @@ func main() {
 	fmt.Printf("Database:  %s\n", cfg.DatabasePath)
 	if cfg.GoogleClientID != "" {
 		fmt.Println("Google:    Enabled")
+	}
+	if cfg.GoogleAdsCustomerID != "" {
+		fmt.Println("Google Ads: Enabled")
+	}
+	if cfg.GoogleDriveFolder != "" {
+		fmt.Printf("Drive Folder: %s\n", cfg.GoogleDriveFolder)
 	}
 	fmt.Println("=================================")
 	log.Fatal(http.ListenAndServe(addr, mux))

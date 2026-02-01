@@ -17,6 +17,7 @@ type Handlers struct {
 	OAuth          *handler.OAuthHandler
 	User           *handler.UserHandler
 	GoogleServices *handler.GoogleServicesHandler
+	GoogleAds      *handler.GoogleAdsHandler
 }
 
 // Setup configures all routes for the application
@@ -104,6 +105,22 @@ func Setup(handlers Handlers, authService auth.Service) *http.ServeMux {
 		mux.HandleFunc("/api/google/tasks/create", chain(handlers.GoogleServices.CreateTask, cors, authRequired))
 		mux.HandleFunc("/api/google/tasks/update", chain(handlers.GoogleServices.UpdateTask, cors, authRequired))
 		mux.HandleFunc("/api/google/tasks/complete", chain(handlers.GoogleServices.CompleteTask, cors, authRequired))
+
+		// Google Drive routes
+		mux.HandleFunc("/api/google/drive/files", chain(handlers.GoogleServices.ListDriveFiles, cors, authRequired))
+		mux.HandleFunc("/api/google/drive/folders", chain(handlers.GoogleServices.CreateDriveFolder, cors, authRequired))
+		mux.HandleFunc("/api/google/drive/upload", chain(handlers.GoogleServices.UploadDriveFile, cors, authRequired))
+		mux.HandleFunc("/api/google/drive/delete", chain(handlers.GoogleServices.DeleteDriveFile, cors, authRequired))
+	}
+
+	// ==================
+	// Google Ads routes (protected)
+	// ==================
+	if handlers.GoogleAds != nil {
+		mux.HandleFunc("/api/google/ads/status", chain(handlers.GoogleAds.GoogleAdsStatus, cors, authRequired))
+		mux.HandleFunc("/api/google/ads/campaigns", chain(handlers.GoogleAds.ListCampaigns, cors, authRequired))
+		mux.HandleFunc("/api/google/ads/campaigns/create", chain(handlers.GoogleAds.CreateCampaign, cors, authRequired))
+		mux.HandleFunc("/api/google/ads/campaigns/performance", chain(handlers.GoogleAds.GetCampaignPerformance, cors, authRequired))
 	}
 
 	return mux

@@ -24,19 +24,29 @@ type Config struct {
 	// Google OAuth
 	GoogleClientID     string
 	GoogleClientSecret string
+
+	// Google Drive
+	GoogleDriveFolder string
+
+	// Google Ads API
+	GoogleAdsCustomerID     string
+	GoogleAdsDeveloperToken string
 }
 
 func Load() *Config {
 	return &Config{
-		Port:               getEnv("PORT", "8005"),
-		StoragePath:        getEnv("STORAGE_PATH", "./storage"),
-		MaxFileSize:        getEnvAsInt64("MAX_FILE_SIZE", 100<<20), // 100MB default
-		DatabasePath:       getEnv("DATABASE_PATH", "./data/gomanager.db"),
-		BaseURL:            getEnv("BASE_URL", "http://localhost:8005"),
-		TokenExpiry:        int(getEnvAsInt64("TOKEN_EXPIRY_HOURS", 24)),
-		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:5173"),
-		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
-		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+		Port:                    getEnv("PORT", "8005"),
+		StoragePath:             getEnv("STORAGE_PATH", "./storage"),
+		MaxFileSize:             getEnvAsInt64("MAX_FILE_SIZE", 100<<20),                                // 100MB default
+		DatabasePath:            getEnv("DATABASE_URL", getEnv("DATABASE_PATH", "./data/gomanager.db")), // Support both DATABASE_URL (PostgreSQL) and DATABASE_PATH (SQLite)
+		BaseURL:                 getEnv("BASE_URL", "http://localhost:8005"),
+		TokenExpiry:             int(getEnvAsInt64("TOKEN_EXPIRY_HOURS", 24)),
+		FrontendURL:             getEnv("FRONTEND_URL", "http://localhost:5173"),
+		GoogleClientID:          getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:      getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GoogleDriveFolder:       getEnv("GOOGLE_DRIVE_FOLDER", "GoManager"),
+		GoogleAdsCustomerID:     getEnv("GOOGLE_ADS_CUSTOMER_ID", ""),
+		GoogleAdsDeveloperToken: getEnv("GOOGLE_ADS_DEVELOPER_TOKEN", ""),
 	}
 }
 

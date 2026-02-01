@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -34,6 +35,9 @@ func NewGoogleServicesHandler(cfg *config.Config, userRepo user.Repository) *Goo
 			"https://www.googleapis.com/auth/calendar.events",
 			"https://www.googleapis.com/auth/tasks.readonly",
 			"https://www.googleapis.com/auth/tasks",
+			"https://www.googleapis.com/auth/drive",
+			"https://www.googleapis.com/auth/drive.file",
+			"https://www.googleapis.com/auth/adwords",
 		},
 		Endpoint: google.Endpoint,
 	}
@@ -550,7 +554,289 @@ func (h *GoogleServicesHandler) GoogleConnectionStatus(w http.ResponseWriter, r 
 		"authProvider": u.AuthProvider,
 		"hasCalendar":  connected,
 		"hasTasks":     connected,
+		"hasDrive":     connected,
+		"hasAds":       connected,
 	})
+}
+
+// ListDriveFiles handles GET /api/google/drive/files
+func (h *GoogleServicesHandler) ListDriveFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		SendError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	u := GetUserFromContext(r.Context())
+	if u == nil {
+		SendError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getOAuthClient(u)
+	if err != nil {
+		SendError(w, "Google account not connected", http.StatusBadRequest)
+		return
+	}
+
+	// Get query parameters
+	folderID := r.URL.Query().Get("folderId")
+	pageSize := r.URL.Query().Get("pageSize")
+	if pageSize == "" {
+		pageSize = "50"
+	}
+	pageToken := r.URL.Query().Get("pageToken")
+
+	// Build API URL
+	apiURL := "https://www.googleapis.com/drive/v3/files"
+	apiURL += "?pageSize=" + pageSize
+	if pageToken != "" {
+		apiURL += "&pageToken=" + url.QueryEscape(pageToken)
+	}
+
+	// If folder ID specified, search within that folder
+	if folderID != "" {
+		apiURL += "&q=" + url.QueryEscape("'"+folderID+"' in parents")
+	}
+
+	apiURL += "&fields=nextPageToken,files(id,name,mimeType,size,parents,createdTime,modifiedTime,webViewLink)"
+
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		SendError(w, "Failed to fetch files", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Files         []DriveFile `json:"files"`
+		NextPageToken string      `json:"nextPageToken"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		SendError(w, "Failed to parse files", http.StatusInternalServerError)
+		return
+	}
+
+	SendSuccess(w, "", result)
+}
+
+// CreateDriveFolder handles POST /api/google/drive/folders
+func (h *GoogleServicesHandler) CreateDriveFolder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		SendError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	u := GetUserFromContext(r.Context())
+	if u == nil {
+		SendError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getOAuthClient(u)
+	if err != nil {
+		SendError(w, "Google account not connected", http.StatusBadRequest)
+		return
+	}
+
+	var request struct {
+		Name     string `json:"name"`
+		ParentID string `json:"parentId,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		SendError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Create folder metadata
+	folderMetadata := map[string]interface{}{
+		"name":     request.Name,
+		"mimeType": "application/vnd.google-apps.folder",
+	}
+
+	if request.ParentID != "" {
+		folderMetadata["parents"] = []string{request.ParentID}
+	}
+
+	body, _ := json.Marshal(folderMetadata)
+
+	resp, err := client.Post("https://www.googleapis.com/drive/v3/files", "application/json", jsonReader(body))
+	if err != nil {
+		SendError(w, "Failed to create folder", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		SendError(w, "Failed to create folder", resp.StatusCode)
+		return
+	}
+
+	var folder DriveFile
+	json.Unmarshal(respBody, &folder)
+
+	SendSuccess(w, "Folder created", folder)
+}
+
+// UploadDriveFile handles POST /api/google/drive/upload
+func (h *GoogleServicesHandler) UploadDriveFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		SendError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	u := GetUserFromContext(r.Context())
+	if u == nil {
+		SendError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getOAuthClient(u)
+	if err != nil {
+		SendError(w, "Google account not connected", http.StatusBadRequest)
+		return
+	}
+
+	// Parse multipart form
+	err = r.ParseMultipartForm(32 << 20) // 32MB max
+	if err != nil {
+		SendError(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		SendError(w, "No file provided", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Get folder ID from form
+	folderID := r.FormValue("folderId")
+
+	// Read file content
+	content, err := io.ReadAll(file)
+	if err != nil {
+		SendError(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	// Create file metadata
+	fileMetadata := map[string]interface{}{
+		"name": header.Filename,
+	}
+
+	if folderID != "" {
+		fileMetadata["parents"] = []string{folderID}
+	}
+
+	metadataJSON, _ := json.Marshal(fileMetadata)
+
+	// Use multipart upload for files
+	boundary := "boundary123456789"
+	var uploadBody bytes.Buffer
+
+	// Write metadata part
+	uploadBody.WriteString("--" + boundary + "\r\n")
+	uploadBody.WriteString("Content-Type: application/json; charset=UTF-8\r\n\r\n")
+	uploadBody.Write(metadataJSON)
+	uploadBody.WriteString("\r\n")
+
+	// Write file content part
+	uploadBody.WriteString("--" + boundary + "\r\n")
+	uploadBody.WriteString("Content-Type: " + header.Header.Get("Content-Type") + "\r\n\r\n")
+	uploadBody.Write(content)
+	uploadBody.WriteString("\r\n--" + boundary + "--")
+
+	req, err := http.NewRequest("POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", &uploadBody)
+	if err != nil {
+		SendError(w, "Failed to create upload request", http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("Content-Type", "multipart/related; boundary="+boundary)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		SendError(w, "Failed to upload file", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		SendError(w, "Upload failed: "+string(respBody), resp.StatusCode)
+		return
+	}
+
+	var uploadedFile DriveFile
+	json.Unmarshal(respBody, &uploadedFile)
+
+	SendSuccess(w, "File uploaded successfully", uploadedFile)
+}
+
+// DeleteDriveFile handles DELETE /api/google/drive/files/{fileId}
+func (h *GoogleServicesHandler) DeleteDriveFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		SendError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	u := GetUserFromContext(r.Context())
+	if u == nil {
+		SendError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getOAuthClient(u)
+	if err != nil {
+		SendError(w, "Google account not connected", http.StatusBadRequest)
+		return
+	}
+
+	fileID := r.URL.Query().Get("fileId")
+	if fileID == "" {
+		SendError(w, "File ID required", http.StatusBadRequest)
+		return
+	}
+
+	req, err := http.NewRequest("DELETE", "https://www.googleapis.com/drive/v3/files/"+url.PathEscape(fileID), nil)
+	if err != nil {
+		SendError(w, "Failed to create delete request", http.StatusInternalServerError)
+		return
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		SendError(w, "Failed to delete file", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		SendError(w, "Failed to delete file", resp.StatusCode)
+		return
+	}
+
+	SendSuccess(w, "File deleted successfully", nil)
+}
+
+// DriveFile represents a Google Drive file
+type DriveFile struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	MimeType     string   `json:"mimeType"`
+	Size         string   `json:"size,omitempty"`
+	Parents      []string `json:"parents,omitempty"`
+	CreatedTime  string   `json:"createdTime"`
+	ModifiedTime string   `json:"modifiedTime"`
+	WebViewLink  string   `json:"webViewLink,omitempty"`
 }
 
 // Error for missing Google token
